@@ -1,22 +1,19 @@
-
-
-use std::cmp::PartialEq;
-use std::process::Command;
 use std::{fmt, io};
+use std::cmp::PartialEq;
 use std::fmt::{Debug, Formatter};
-use std::io::{BufRead, Read, StdinLock, Write};
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{Receiver, Sender};
+use std::io::{BufRead, StdinLock, Write};
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::mpsc::Receiver;
 use std::thread::sleep;
+
 use arrayvec::ArrayVec;
 use crossterm::terminal;
 use once_cell::unsync::Lazy;
 use scopeguard::defer;
 use unicode_segmentation::UnicodeSegmentation;
-use lazy_static::lazy_static;
-use once_cell::sync::OnceCell;
 
 #[derive(Debug, Clone, Copy)]
 enum Color {
@@ -76,6 +73,7 @@ impl Rgb {
         let m_cbrt = cbrt(m);
         let s_cbrt = cbrt(s);
 
+        #[allow(non_snake_case)]
         let L = l_cbrt * 0.2104542553 + m_cbrt * 0.7936177850 - s_cbrt * 0.0040720468;
         let a = l_cbrt * 1.9779984951 - m_cbrt * 2.4285922050 + s_cbrt * 0.4505937099;
         let b = l_cbrt * 0.0259040371 + m_cbrt * 0.7827717662 - s_cbrt * 0.8086757660;
@@ -147,7 +145,7 @@ impl Oklab {
 
 #[derive(Debug, Clone)]
 enum AnsiTemplatePart {
-    ControlSequenceConst(&'static str, isize, bool), // Control sequence, x_pos, isAbsolute
+    ControlSequenceConst(&'static str, isize, bool), // Control sequence, x_pos, is_absolute
     Foreground(),
     Background(),
     AsciiConst(&'static str),
@@ -176,18 +174,18 @@ impl<const LENGTH: usize, const COLOURS: usize, const VARIABLES: usize> AnsiStri
         assert_eq!(color_count, COLOURS);
         assert_eq!(variable_count, VARIABLES);
         Self {
-            sequences: sequences,
+            sequences,
         }
     }
 
     fn with(&self, colors: [Color; COLOURS], variable_values: [&dyn fmt::Display; VARIABLES]) -> AnsiString<LENGTH, COLOURS, VARIABLES> {
         AnsiDisplay {
             template: self.clone(),
-            colors: colors,
+            colors,
             variables: variable_values.iter()
                 .map(|display| AnsiVariable::Display(*display))
                 .collect::<ArrayVec<AnsiVariable, VARIABLES>>().into_inner().unwrap_or_else(|_| panic!("Expected {} variables", VARIABLES)),
-        }.toAnsiString()
+        }.to_ansi_string()
     }
 }
 
@@ -206,7 +204,7 @@ struct AnsiDisplay<'a, const LENGTH: usize, const COLOURS: usize, const VARIABLE
 
 impl<'a, const LENGTH: usize, const COLOURS: usize, const VARIABLES: usize>
 AnsiDisplay<'a, LENGTH, COLOURS, VARIABLES> {
-    fn toAnsiString(&self) -> AnsiString<LENGTH, COLOURS, VARIABLES> {
+    fn to_ansi_string(&self) -> AnsiString<LENGTH, COLOURS, VARIABLES> {
         let variables_as_strings: ArrayVec<String, VARIABLES> = self.variables.iter().zip(self.template.sequences.iter().filter_map(|part| match part {
             AnsiTemplatePart::AsciiVariable(length) => Some(length.clone()),
             _ => None,
@@ -245,16 +243,16 @@ struct AnsiString<const LENGTH: usize, const COLOURS: usize, const variables: us
 
 
 
-impl<const LENGTH: usize, const COLOURS: usize, const variables: usize> fmt::Display for
-AnsiString<LENGTH, COLOURS, variables> {
+impl<const LENGTH: usize, const COLOURS: usize, const VARIABLES: usize> fmt::Display for
+AnsiString<LENGTH, COLOURS, VARIABLES> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut color_index = 0;
         let mut variable_index = 0;
         let mut x_pos = 0;
         for sequence in &self.template.sequences {
             match sequence {
-                AnsiTemplatePart::ControlSequenceConst(sequence, x_pos_new, isAbsolute) => {
-                    x_pos = if *isAbsolute { *x_pos_new } else { x_pos + *x_pos_new };
+                AnsiTemplatePart::ControlSequenceConst(sequence, x_pos_new, is_absolute) => {
+                    x_pos = if *is_absolute { *x_pos_new } else { x_pos + *x_pos_new };
                     write!(f, "{}", sequence)?;
                 }
                 AnsiTemplatePart::Foreground() | AnsiTemplatePart::Background() => {
@@ -303,8 +301,8 @@ AnsiStringDiff<'_, LENGTH, COLOURS, VARIABLES> {
 
         for new_sequence in self.new.template.sequences.iter() {
             match new_sequence {
-                AnsiTemplatePart::ControlSequenceConst(new_sequence, x_pos_new, isAbsolute) => {
-                    x_pos = if *isAbsolute { *x_pos_new } else { x_pos + *x_pos_new };
+                AnsiTemplatePart::ControlSequenceConst(new_sequence, x_pos_new, is_absolute) => {
+                    x_pos = if *is_absolute { *x_pos_new } else { x_pos + *x_pos_new };
                     out.push((false, new_sequence.to_string()));
                 }
                 AnsiTemplatePart::Background() | AnsiTemplatePart::Foreground() =>  {
@@ -448,7 +446,7 @@ fn get_console_background_color() -> io::Result<Rgb> {
         let mut byte = 0u8;
         
         fn read_byte(into: &mut u8) -> bool {
-            stdin_channel.get().map_or_else( || false, |mutex| {
+            STDIN_CHANNEL.get().map_or_else(|| false, |mutex| {
                 mutex.lock().map_or_else(
                     |_| false,
                     |receiver| {
@@ -594,7 +592,7 @@ impl I8kctlOutput {
         })
     }
 
-    fn toAnsiString(&self) -> AnsiString<14, 2, 5> {
+    fn to_ansi_string(&self) -> AnsiString<14, 2, 5> {
 
         let temp_st = format!("{:.1}°C", self.temperature);
         OUTPUT_TEMPLATE.with(
@@ -609,31 +607,31 @@ impl I8kctlOutput {
     }
 
     fn print_ansi(&self) {
-        println!("{}", self.toAnsiString());
+        println!("{}", self.to_ansi_string());
     }
 
 
 }
 
-static shutdown: AtomicBool = AtomicBool::new(false);
-static shutdown_stdin: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_STDIN: AtomicBool = AtomicBool::new(false);
 
 
 
-static stdin_channel: OnceLock<Mutex<Receiver<u8>>> = OnceLock::new();
+static STDIN_CHANNEL: OnceLock<Mutex<Receiver<u8>>> = OnceLock::new();
 
 fn main() {
-    defer!(shutdown_stdin.store(true, Relaxed));
+    defer!(SHUTDOWN_STDIN.store(true, Relaxed));
     terminal::enable_raw_mode().unwrap();
     defer!(_ = terminal::disable_raw_mode());
     //create a new thread that listens to stdin one byte at a time
     //inter thread mpsc channel
     let (sender, receiver) = std::sync::mpsc::channel::<u8>();
-    stdin_channel.set(Mutex::new(receiver)).unwrap();
+    STDIN_CHANNEL.set(Mutex::new(receiver)).unwrap();
 
 
     _ = std::thread::spawn(move || {
-        defer!(shutdown.store(true, Relaxed));
+        defer!(SHUTDOWN.store(true, Relaxed));
         //crossterm enable raw mode
         let stdin = io::stdin();
         let mut handle = stdin.lock();
@@ -653,24 +651,24 @@ fn main() {
 
 
 
-        while !shutdown_stdin.load(Relaxed) && fill_buf(&mut handle, &mut out) {
+        while !SHUTDOWN_STDIN.load(Relaxed) && fill_buf(&mut handle, &mut out) {
             for byte in out {
-                if shutdown_stdin.load(Relaxed) {
+                if SHUTDOWN_STDIN.load(Relaxed) {
                     return;
                 }
 
                 buffer.push(*byte);
                 if *byte == 17/*CTRL Q*/ || *byte == 3/*CTRL C*/ {
-                    shutdown.store(true, Relaxed);
+                    SHUTDOWN.store(true, Relaxed);
                 } else {
                     match sender.send(*byte) {
                         Ok(x) => x,
                         Err(err) => {
-                            if shutdown.load(Relaxed) || shutdown_stdin.load(Relaxed) {
+                            if SHUTDOWN.load(Relaxed) || SHUTDOWN_STDIN.load(Relaxed) {
                                 return;
                             }
                             //move a line down and print the error and then back
-                            //print!("\x1b[1BError: Failed to send byte to main thread: {}\x1b[1A", err);
+                            print!("\x1b[1BError: Failed to send byte to main thread: {}\x1b[1A", err);
                             return;
                         }
                     };
@@ -714,18 +712,18 @@ fn main() {
     print!("\x1b[s");
     let mut last_output = I8kctlOutput::from_command()
         .expect("Failed to get initial i8kctl output")
-        .toAnsiString();
+        .to_ansi_string();
     print!("{}", last_output);
 
     let mut shutting_down = false;
     loop {
         for i in 0..20 {
-            if (!shutdown.load(std::sync::atomic::Ordering::Relaxed)) {
+            if !SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
                 sleep(std::time::Duration::from_millis(200));
             }
             let output = I8kctlOutput::from_command()
                 .expect("Failed to get i8kctl output");
-            let current_output = output.toAnsiString();
+            let current_output = output.to_ansi_string();
 
             print!("\x1b[u\x1b[s"); //restore saved cursor position, then save again
 
@@ -740,7 +738,7 @@ fn main() {
                 });
             }
             last_output = current_output;
-            if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
                 if shutting_down {
                     println!();
                     return;
