@@ -1,0 +1,17 @@
+[package]
+name = "DellFanTemperatureMon"
+version = "1.0.0"
+edition = "2021"
+
+[profile.release]
+opt-level = "s"  # Optimize for size.
+
+[dependencies]
+arrayvec = "0.7.4"
+once_cell = "1.19.0"
+unicode-segmentation = "1.11.0"
+crossterm =  "=0.25.0"
+
+scopeguard = "1.2.0"
+ctrlc = {features = ["termination"], version = "3.4.4"}
+lazy_static = "1.5.0"
